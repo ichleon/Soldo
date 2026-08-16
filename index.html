@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kontoblick – Kontoanalyse</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--text:#17202a;--muted:#68727d;--line:#e5e9ee;--accent:#2864ff;--green:#16834a;--red:#d63b3b;--shadow:0 8px 28px #17202a12}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+header{background:#111827;color:white;padding:22px 18px;position:sticky;top:0;z-index:5}header .wrap{max-width:1200px;margin:auto;display:flex;justify-content:space-between;align-items:center;gap:16px}h1{font-size:23px;margin:0}header p{margin:4px 0 0;color:#b9c2cf;font-size:13px}
+main{max-width:1200px;margin:20px auto;padding:0 16px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:17px;box-shadow:var(--shadow);margin-bottom:16px}.metric{min-height:112px}.label{font-size:13px;color:var(--muted)}.value{font-size:27px;font-weight:750;margin-top:10px}.positive{color:var(--green)}.negative{color:var(--red)}
+.toolbar{display:flex;flex-wrap:wrap;gap:9px;align-items:center}.btn,input,select{font:inherit;border:1px solid #d7dce2;border-radius:9px;padding:10px 12px;background:white}.btn{cursor:pointer;font-weight:650}.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.btn.danger{color:var(--red)}input[type=file]{max-width:100%}
+.section-title{display:flex;justify-content:space-between;align-items:center;gap:10px}.section-title h2{font-size:18px;margin:0 0 12px}
+.charts{display:grid;grid-template-columns:1.5fr 1fr;gap:16px}.chart{height:290px;position:relative}.chart canvas{width:100%;height:100%}
+.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:11px 8px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-size:12px}.amount{text-align:right;font-variant-numeric:tabular-nums}.tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef2f6;font-size:12px}
+.empty{text-align:center;color:var(--muted);padding:35px 10px}.notice{background:#fff8e5;border:1px solid #f0d68a;padding:12px;border-radius:10px;color:#664e0b;font-size:13px;line-height:1.5}
+.progress{height:8px;background:#edf0f3;border-radius:99px;overflow:hidden;margin-top:8px}.progress i{display:block;height:100%;background:var(--accent)}
+small{color:var(--muted)}.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}.forecast-row{display:grid;grid-template-columns:100px 1fr 110px;gap:10px;align-items:center;margin:11px 0;font-size:13px}
+@media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.charts,.two{grid-template-columns:1fr}}@media(max-width:520px){.grid{grid-template-columns:1fr}header{position:static}.value{font-size:24px}}
+</style>
+</head>
+<body>
+<header><div class="wrap"><div><h1>Kontoblick</h1><p>Lokale Kontoanalyse & Prognose</p></div><span id="status">Keine Daten</span></div></header>
+
+<main>
+<div class="card">
+  <div class="section-title"><h2>Kontoauszug importieren</h2></div>
+  <div class="toolbar">
+    <input id="file" type="file" accept=".csv,.txt,.json,.pdf,image/*" multiple>
+    <button class="btn primary" onclick="document.getElementById('file').click()">Kontoauszug auswählen</button>
+    <button class="btn" onclick="demo()">Beispieldaten</button>
+    <button class="btn danger" onclick="clearAll()">Daten löschen</button>
+  </div>
+  <div id="ocrStatus" style="margin-top:10px;color:var(--muted);font-size:13px"></div>
+  <div id="imagePreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+  <p><small>Unterstützt CSV/TXT/JSON sowie Bilder (JPG, PNG, WEBP). Bilder werden lokal per OCR analysiert. Alternativ kannst du unten Buchungen manuell hinzufügen.</small></p>
+  <div class="notice"><b>Datenschutz:</b> Diese Version verarbeitet die importierten Daten ausschließlich in deinem Browser. Es gibt keinen Server-Upload. Die Daten werden nur gespeichert, wenn du die lokale Speicherung verwendest.</div>
+</div>
+
+<div class="card">
+  <div class="section-title"><h2>Manuelle Buchung</h2></div>
+  <div class="toolbar">
+    <input id="mDate" type="date">
+    <input id="mDesc" placeholder="Beschreibung">
+    <input id="mAmount" type="number" step="0.01" placeholder="Betrag (+ Einnahme / - Ausgabe)">
+    <button class="btn primary" onclick="addManual()">Hinzufügen</button>
+  </div>
+</div>
+
+<div class="grid">
+ <div class="card metric"><div class="label">Aktueller Kontostand</div><div id="balance" class="value">0,00 €</div></div>
+ <div class="card metric"><div class="label">Einnahmen</div><div id="income" class="value positive">0,00 €</div></div>
+ <div class="card metric"><div class="label">Ausgaben</div><div id="expense" class="value negative">0,00 €</div></div>
+ <div class="card metric"><div class="label">Buchungen</div><div id="count" class="value">0</div></div>
+</div>
+
+<div class="charts">
+ <div class="card"><div class="section-title"><h2>Saldo-Verlauf</h2></div><div class="chart"><canvas id="balanceChart"></canvas></div></div>
+ <div class="card"><div class="section-title"><h2>Ausgaben nach Kategorie</h2></div><div class="chart"><canvas id="categoryChart"></canvas></div></div>
+</div>
+
+<div class="two">
+ <div class="card"><div class="section-title"><h2>Wiederkehrende Buchungen</h2></div><div id="recurring"></div></div>
+ <div class="card"><div class="section-title"><h2>Kontostand-Prognose</h2><select id="forecastDays" onchange="render()"><option value="30">30 Tage</option><option value="60">60 Tage</option><option value="90" selected>90 Tage</option><option value="180">180 Tage</option></select></div><div id="forecast"></div></div>
+</div>
+
+<div class="card">
+ <div class="section-title"><h2>Größte Ausgaben</h2></div>
+ <div class="table-wrap"><table><thead><tr><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th class="amount">Betrag</th></tr></thead><tbody id="largest"></tbody></table></div>
+</div>
+
+<div class="card">
+ <div class="section-title"><h2>Alle Buchungen</h2><div class="toolbar"><input id="search" placeholder="Suchen…" oninput="renderTransactions()"><select id="typeFilter" onchange="renderTransactions()"><option value="all">Alle</option><option value="income">Einnahmen</option><option value="expense">Ausgaben</option></select></div></div>
+ <div class="table-wrap"><table><thead><tr><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th class="amount">Betrag</th><th></th></tr></thead><tbody id="transactions"></tbody></table></div>
+</div>
+</main>
+
+<script>
+"use strict";
+let tx = JSON.parse(localStorage.getItem("kontoblick_tx") || "[]");
+const euro = n => new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(n);
+const dateFmt = s => new Date(s+"T12:00:00").toLocaleDateString("de-DE");
+const escapeHTML = s => String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+function normalizeDate(s){
+  if(!s)return null;
+  s=String(s).trim();
+  let m=s.match(/^(\\d{1,2})[.\\/-](\\d{1,2})[.\\/-](\\d{2,4})$/);
+  if(m){let y=m[3].length===2?"20"+m[3]:m[3];return `${y}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;}
+  let d=new Date(s); return isNaN(d)?null:d.toISOString().slice(0,10);
+}
+function parseAmount(s){
+  if(typeof s==="number")return s;
+  s=String(s).replace(/[€$£\\s]/g,"").trim();
+  if(s.includes(",") && s.lastIndexOf(",")>s.lastIndexOf(".")) s=s.replace(/\\./g,"").replace(",",".");
+  else s=s.replace(/,/g,"");
+  s=s.replace(/[^0-9.+-]/g,"");
+  return parseFloat(s);
+}
+function categorize(desc){
+  const d=desc.toLowerCase();
+  const rules=[
+   ["Miete/Wohnen",/miete|vermiet|wohnung|hausverwaltung|strom|energie|gas|heizung|wasser/],
+   ["Lebensmittel",/aldi|lidl|rewe|edeka|kaufland|penny|netto|supermarkt|lebensmittel/],
+   ["Mobilität",/tank|shell|aral|esso|omv|bus|bahn|db |uber|bolt|park/],
+   ["Abos",/netflix|spotify|amazon prime|disney|youtube|adobe|microsoft|abo/],
+   ["Online/Einkauf",/amazon|ebay|paypal|shop|zalando|ikea|mediamarkt/],
+   ["Gehalt",/gehalt|lohn|salary|arbeitsentgelt/],
+   ["Versicherung",/versicherung|axa|allianz|huk|devk/],
+   ["Freizeit",/kino|restaurant|cafe|bar|steam|playstation|xbox|event/],
+   ["Bank/Gebühren",/gebühr|entgelt|bank|zins/]
+  ];
+  for(const [name,re] of rules)if(re.test(d))return name;
+  return "Sonstiges";
+}
+function addTx(date,desc,amount,cat){
+  if(!date||!desc||!isFinite(amount))return;
+  tx.push({id:crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random(),date,desc:desc.trim(),amount:Number(amount),cat:cat||categorize(desc)});
+}
+function save(){localStorage.setItem("kontoblick_tx",JSON.stringify(tx));}
+
+/*
+  OCR:
+  Diese Standalone-Datei lädt Tesseract.js zur Laufzeit über CDN.
+  Eine echte, mehrere MB große OCR-Engine vollständig in den HTML-Text
+  einzubetten würde die Datei unnötig massiv machen. Die Anwendung bleibt
+  ansonsten vollständig lokal; nur die OCR-Bibliothek wird bei Bedarf geladen.
+*/
+let ocrLoaded=false;
+async function loadOCR(){
+  if(ocrLoaded && window.Tesseract)return window.Tesseract;
+  const status=document.getElementById("ocrStatus");
+  status.textContent="OCR-Bibliothek wird geladen …";
+  if(window.Tesseract){ocrLoaded=true;return window.Tesseract;}
+  await new Promise((resolve,reject)=>{
+    const sc=document.createElement("script");
+    sc.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    sc.onload=resolve;sc.onerror=reject;document.head.appendChild(sc);
+  });
+  ocrLoaded=true;
+  return window.Tesseract;
+}
+function previewImage(file){
+  const box=document.getElementById("imagePreview");
+  const img=document.createElement("img");
+  img.src=URL.createObjectURL(file);
+  img.style.cssText="width:130px;height:90px;object-fit:cover;border-radius:8px;border:1px solid var(--line)";
+  box.appendChild(img);
+}
+function parseOCRText(text){
+  let added=0;
+  const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  for(const line of lines){
+    const dates=line.match(/\b(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})\b/g);
+    if(!dates)continue;
+    const date=normalizeDate(dates[0]);
+    const amounts=[...line.matchAll(/[-+]?\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})\s*(?:€|EUR)?|[-+]?\d+\.\d{2}\s*(?:€|EUR)?/gi)]
+      .map(m=>parseAmount(m[0])).filter(Number.isFinite);
+    if(!amounts.length)continue;
+    // Bei typischen Kontoauszügen ist der letzte Geldbetrag der relevante Betrag.
+    const amount=amounts[amounts.length-1];
+    let desc=line.replace(dates[0],"").replace(/[-+]?\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})\s*(?:€|EUR)?|[-+]?\d+\.\d{2}\s*(?:€|EUR)?/gi,"").replace(/\s{2,}/g," ").trim();
+    if(desc.length<2)desc="OCR-Buchung";
+    addTx(date,desc,amount);
+    added++;
+  }
+  return added;
+}
+async function processImage(file){
+  previewImage(file);
+  const status=document.getElementById("ocrStatus");
+  try{
+    const T=await loadOCR();
+    status.textContent="OCR läuft: "+file.name+" …";
+    const worker=await T.createWorker("deu+eng");
+    const result=await worker.recognize(file);
+    await worker.terminate();
+    const n=parseOCRText(result.data.text);
+    save();render();
+    status.textContent=n+" Buchung(en) aus "+file.name+" erkannt. Bitte die Ergebnisse kontrollieren.";
+  }catch(err){
+    console.error(err);
+    status.textContent="OCR konnte nicht ausgeführt werden: "+err.message;
+  }
+}
+document.getElementById("file").addEventListener("change",async e=>{
+ const files=[...e.target.files];
+ for(const f of files){
+   if(f.type.startsWith("image/")) await processImage(f);
+   else if(f.name.toLowerCase().endsWith(".json")){
+     try{
+       const j=JSON.parse(await f.text());
+       tx=Array.isArray(j)?j:j.transactions||[];
+       save();render();
+     }catch{alert("JSON-Datei konnte nicht gelesen werden.");}
+   } else if(f.type==="application/pdf" || f.name.toLowerCase().endsWith(".pdf")){
+     document.getElementById("ocrStatus").textContent="PDF erkannt. Für PDF-OCR ist in dieser Version noch kein PDF-Renderer eingebettet; bitte Seiten als PNG/JPG exportieren.";
+   } else {
+     importText(await f.text());
+   }
+ }
+ e.target.value="";
+});
+function importText(text){
+ const lines=text.replace(/^\\uFEFF/,"").split(/\\r?\\n/).filter(x=>x.trim());
+ let added=0;
+ for(const line of lines){
+   const cols=line.split(/;|\\t|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(x=>x.trim().replace(/^"|"$/g,""));
+   let date=null, amount=null, desc="";
+   for(const c of cols){if(!date)date=normalizeDate(c);let a=parseAmount(c);if(isFinite(a)&&/[0-9]/.test(c)&&/[,.€+-]/.test(c))amount=a;}
+   if(date){
+     const candidates=cols.filter(c=>c!==date);
+     desc=candidates.filter(c=>!isFinite(parseAmount(c))||!/^[+-]?[\\d., €]+$/.test(c)).join(" ");
+     if(!desc)desc="Buchung";
+     if(isFinite(amount)){addTx(date,desc,amount);added++;}
+   }
+ }
+ save();render(); alert(added+" Buchung(en) importiert.");
+}
+function addManual(){
+ const d=document.getElementById("mDate").value||new Date().toISOString().slice(0,10);
+ const desc=document.getElementById("mDesc").value.trim();
+ const a=parseFloat(document.getElementById("mAmount").value);
+ if(!desc||!isFinite(a)){alert("Bitte Beschreibung und Betrag eingeben.");return}
+ addTx(d,desc,a);save();render();
+ document.getElementById("mDesc").value="";document.getElementById("mAmount").value="";
+}
+function removeTx(id){tx=tx.filter(x=>x.id!==id);save();render();}
+function clearAll(){if(confirm("Alle lokal gespeicherten Buchungen löschen?")){tx=[];save();render();}}
+function sorted(){return [...tx].sort((a,b)=>a.date.localeCompare(b.date));}
+function currentBalance(){return tx.reduce((s,x)=>s+x.amount,0)}
+function detectRecurring(){
+ const groups={};
+ for(const x of tx){
+  const key=x.desc.toLowerCase().replace(/\\d+/g,"").replace(/[^a-zäöüß ]/g,"").replace(/\\s+/g," ").trim();
+  if(key.length<3)continue;
+  (groups[key]??=[]).push(x);
+ }
+ return Object.entries(groups).map(([key,a])=>{
+   if(a.length<3)return null;
+   a.sort((x,y)=>x.date.localeCompare(y.date));
+   const gaps=[];for(let i=1;i<a.length;i++)gaps.push((new Date(a[i].date)-new Date(a[i-1].date))/86400000);
+   const avg=gaps.reduce((s,n)=>s+n,0)/gaps.length;
+   const regular=avg>=25&&avg<=35||avg>=6&&avg<=8||avg>=85&&avg<=100||avg>=350&&avg<=380;
+   if(!regular)return null;
+   return {desc:a[a.length-1].desc,amount:a.reduce((s,x)=>s+x.amount,0)/a.length,interval:avg,last:a[a.length-1].date,n:a.length};
+ }).filter(Boolean);
+}
+function render(){
+ const income=tx.filter(x=>x.amount>0).reduce((s,x)=>s+x.amount,0);
+ const expense=-tx.filter(x=>x.amount<0).reduce((s,x)=>s+x.amount,0);
+ document.getElementById("balance").textContent=euro(currentBalance());
+ document.getElementById("income").textContent=euro(income);
+ document.getElementById("expense").textContent=euro(expense);
+ document.getElementById("count").textContent=tx.length;
+ document.getElementById("status").textContent=tx.length?tx.length+" Buchungen":"Keine Daten";
+ renderTransactions(); renderLargest(); renderRecurring(); renderForecast(); drawCharts();
+}
+function renderTransactions(){
+ const q=document.getElementById("search").value.toLowerCase(), type=document.getElementById("typeFilter").value;
+ const rows=[...tx].sort((a,b)=>b.date.localeCompare(a.date)).filter(x=>(x.desc.toLowerCase().includes(q)||x.cat.toLowerCase().includes(q))&&(type==="all"||(type==="income"?x.amount>0:x.amount<0)));
+ document.getElementById("transactions").innerHTML=rows.length?rows.map(x=>`<tr><td>${dateFmt(x.date)}</td><td>${escapeHTML(x.desc)}</td><td><span class="tag">${escapeHTML(x.cat)}</span></td><td class="amount ${x.amount>=0?"positive":"negative"}">${euro(x.amount)}</td><td><button class="btn" onclick="removeTx('${x.id}')">×</button></td></tr>`).join(""):`<tr><td colspan="5" class="empty">Keine Buchungen</td></tr>`;
+}
+function renderLargest(){
+ const a=tx.filter(x=>x.amount<0).sort((x,y)=>x.amount-y.amount).slice(0,10);
+ document.getElementById("largest").innerHTML=a.length?a.map(x=>`<tr><td>${dateFmt(x.date)}</td><td>${escapeHTML(x.desc)}</td><td>${escapeHTML(x.cat)}</td><td class="amount negative">${euro(x.amount)}</td></tr>`).join(""):`<tr><td colspan="4" class="empty">Keine Ausgaben</td></tr>`;
+}
+function renderRecurring(){
+ const a=detectRecurring();
+ document.getElementById("recurring").innerHTML=a.length?a.map(x=>{
+  const freq=x.interval<10?"ca. wöchentlich":x.interval<45?"ca. monatlich":x.interval<120?"ca. vierteljährlich":"ca. jährlich";
+  return `<div style="margin:12px 0"><b>${escapeHTML(x.desc)}</b><br><small>${freq} · durchschnittlich ${euro(x.amount)} · ${x.n} Treffer</small><div class="progress"><i style="width:${Math.min(100,x.n*20)}%"></i></div></div>`;
+ }).join(""):`<div class="empty">Noch keine ausreichend regelmäßigen Buchungen erkannt.<br><small>Mindestens 3 ähnlich benannte Buchungen werden benötigt.</small></div>`;
+}
+function nextOccurrence(last,interval){
+ let d=new Date(last+"T12:00:00");d.setDate(d.getDate()+Math.round(interval));return d;
+}
+function renderForecast(){
+ const days=+document.getElementById("forecastDays").value, rec=detectRecurring(), start=currentBalance(), today=new Date();
+ let events=[];
+ for(const r of rec){
+  let d=nextOccurrence(r.last,r.interval);
+  while(d<=new Date(today.getTime()+days*86400000)){events.push({date:d,amount:r.amount});d.setDate(d.getDate()+Math.round(r.interval));}
+ }
+ let end=start+events.reduce((s,x)=>s+x.amount,0);
+ let monthly=tx.filter(x=>x.date>=new Date(today.getFullYear(),today.getMonth(),1).toISOString().slice(0,10));
+ let avg=monthly.length?monthly.reduce((s,x)=>s+x.amount,0):0;
+ document.getElementById("forecast").innerHTML=`<div style="font-size:14px;color:var(--muted)">Start</div><div class="value">${euro(start)}</div><div class="forecast-row"><b>Heute</b><span>aktueller Stand</span><strong>${euro(start)}</strong></div><div class="forecast-row"><b>${days} Tage</b><span>nur erkannte Wiederholungen</span><strong class="${end<0?"negative":"positive"}">${euro(end)}</strong></div><small>Prognose ist eine Schätzung. Unregelmäßige Ausgaben, neue Verträge und nicht erkannte Buchungen werden nicht vorhergesagt.</small>`;
+}
+function setupCanvas(c){
+ const r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=r.width*d;c.height=r.height*d;const ctx=c.getContext("2d");ctx.scale(d,d);return [ctx,r.width,r.height];
+}
+function drawCharts(){
+ drawBalance();drawCategories();
+}
+function drawBalance(){
+ const c=document.getElementById("balanceChart"),[ctx,w,h]=setupCanvas(c);ctx.clearRect(0,0,w,h);
+ const a=sorted();if(!a.length){ctx.fillStyle="#68727d";ctx.fillText("Keine Daten",w/2-30,h/2);return}
+ let bal=0,pts=a.map(x=>{bal+=x.amount;return {d:x.date,v:bal}}),min=Math.min(...pts.map(p=>p.v)),max=Math.max(...pts.map(p=>p.v));if(min===max){min-=1;max+=1}
+ const pad={l:48,r:12,t:15,b:32},pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+ ctx.strokeStyle="#e5e9ee";ctx.lineWidth=1;for(let i=0;i<5;i++){let y=pad.t+ph*i/4;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke();ctx.fillStyle="#68727d";ctx.font="11px system-ui";ctx.fillText(euro(max-(max-min)*i/4),2,y+4)}
+ ctx.beginPath();pts.forEach((p,i)=>{let x=pad.l+pw*(pts.length===1?0:i/(pts.length-1)),y=pad.t+ph*(1-(p.v-min)/(max-min));i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.strokeStyle="#2864ff";ctx.lineWidth=2.5;ctx.stroke();
+}
+function drawCategories(){
+ const c=document.getElementById("categoryChart"),[ctx,w,h]=setupCanvas(c);ctx.clearRect(0,0,w,h);
+ const sums={};tx.filter(x=>x.amount<0).forEach(x=>sums[x.cat]=(sums[x.cat]||0)-x.amount);
+ const a=Object.entries(sums).sort((x,y)=>y[1]-x[1]).slice(0,7), total=a.reduce((s,x)=>s+x[1],0);
+ if(!a.length){ctx.fillStyle="#68727d";ctx.fillText("Keine Ausgaben",w/2-35,h/2);return}
+ let y=18;ctx.font="12px system-ui";a.forEach(([name,val])=>{let bar=(w-125)*(val/Math.max(...a.map(x=>x[1])));ctx.fillStyle="#2864ff";ctx.fillRect(105,y,bar,18);ctx.fillStyle="#17202a";ctx.fillText(name,4,y+13);ctx.fillText(euro(val)+" ("+Math.round(val/total*100)+"%)",110+bar,y+13);y+=35;});
+}
+function demo(){
+ tx=[];const data=[
+ ["2026-05-01","Gehalt",2200],["2026-05-02","Miete", -720],["2026-05-03","REWE Einkauf",-74.32],["2026-05-05","Netflix",-17.99],["2026-05-07","Tankstelle",-62.1],["2026-05-10","Amazon",-43.5],["2026-05-15","Gehalt",2200],["2026-06-01","Miete",-720],["2026-06-03","REWE Einkauf",-91.42],["2026-06-05","Netflix",-17.99],["2026-06-07","Tankstelle",-70.2],["2026-06-10","Amazon",-31.5],["2026-06-15","Gehalt",2200],["2026-07-01","Miete",-720],["2026-07-03","REWE Einkauf",-82.15],["2026-07-05","Netflix",-17.99],["2026-07-07","Tankstelle",-55.2],["2026-07-10","Amazon",-66.2],["2026-07-15","Gehalt",2200],["2026-08-01","Miete",-720],["2026-08-03","REWE Einkauf",-101.22],["2026-08-05","Netflix",-17.99]];
+ data.forEach(x=>addTx(x[0],x[1],x[2]));save();render();
+}
+render();
+</script>
+</body>
+</html>
